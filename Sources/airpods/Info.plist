@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>airpods</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.airpods.motion</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>airpods</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Uses the camera to move the pointer from where you are looking.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Streams AirPods head orientation and acceleration to a local UDP port.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Takes a screenshot of the whole screen when you clench your jaw.</string>
+</dict>
+</plist>

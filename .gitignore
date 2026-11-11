@@ -1,0 +1,4 @@
+.build/
+airpods.app/
+data/
+.DS_Store
