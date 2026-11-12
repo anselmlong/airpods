@@ -1,14 +1,16 @@
-"""Hands-free scrolling: nod down for the next video, nod up to go back.
+"""Hands-free scrolling: nod or clench to advance, nod up to go back.
 
 Reads the same UDP motion stream as the other tools in this folder:
 
     ./airpods.app/Contents/MacOS/airpods --stream-only
-    python game/scroll.py
+    python game/scroll.py                 # nod down = next, nod up = back
+    python game/scroll.py --clench        # a jaw clench advances too
+    python game/scroll.py --clench --no-nod
 
-The gesture logic is a plain function of (pitch, time), so it can be exercised without
-AirPods or a Mac:
+The gesture logic is a function of the motion samples alone, so it can be exercised
+without AirPods or a Mac:
 
-    python game/scroll.py --selftest     # synthetic nods, asserts what the detector emits
+    python game/scroll.py --selftest     # synthetic nods and clenches, asserts the events
     python game/scroll.py --simulate     # print what it would do, no events sent
     python game/scroll.py --demo         # read the real stream, print, send nothing
 
@@ -23,9 +25,9 @@ from __future__ import annotations
 import argparse
 import math
 import sys
-import time
 
-from stream import MotionStream
+from control import Controller
+from stream import MotionStream, Sample
 
 DEFAULT_NOD_DEG = 10.0
 DEFAULT_CALIBRATE_S = 1.5
@@ -116,43 +118,57 @@ def read_stream(host: str, port: int):
     while True:
         sample = stream.read()
         if sample is not None:
-            yield sample.pitch, sample.t
+            yield sample
 
 
-def simulate(step_s: float = 0.02, cycles: int = 3):
-    """A head that holds still, nods down, returns, then nods up: enough to watch the detector work."""
+def simulate(step_s: float = 0.02, cycles: int = 3, clench: bool = True):
+    """A head that holds still, nods down, returns, nods up, then clenches."""
     t = 0.0
 
     def ramp(a: float, b: float, dur: float):
         nonlocal t
         n = max(1, int(dur / step_s))
         for i in range(n):
-            yield math.radians(a + (b - a) * (i + 1) / n), t
+            yield Sample(0.0, math.radians(a + (b - a) * (i + 1) / n), 0.0, 0.0, 0.0, 0.0, t)
             t += step_s
 
-    def hold(deg: float, dur: float):
+    def hold(deg: float, dur: float, spike: float = 0.0):
         nonlocal t
         for _ in range(max(1, int(dur / step_s))):
-            yield math.radians(deg), t
+            yield Sample(0.0, math.radians(deg), 0.0, spike, 0.0, 0.0, t)
             t += step_s
 
-    yield from hold(0.0, 2.0)          # calibration window
+    yield from hold(0.0, 2.0)            # calibration window
     for _ in range(cycles):
-        yield from ramp(0.0, 22.0, 0.6)   # nod down
-        yield from ramp(22.0, 0.0, 0.4)   # back to neutral
+        yield from ramp(0.0, 22.0, 0.6)  # nod down
+        yield from ramp(22.0, 0.0, 0.4)  # back to neutral
         yield from hold(0.0, 1.0)
         yield from ramp(0.0, -22.0, 0.6)  # nod up
         yield from ramp(-22.0, 0.0, 0.4)
         yield from hold(0.0, 1.0)
+        if clench:
+            yield from hold(0.0, 0.06, spike=0.6)  # jaw clench: acceleration, no head movement
+            yield from hold(0.0, 1.0)
+
+
+def gestures(source, nod: "NodDetector | None", clench: "Controller | None"):
+    """Yield (direction, reason) for every gesture in a stream of samples."""
+    for s in source:
+        if nod is not None:
+            direction = nod.feed(s.pitch, s.t)
+            if direction:
+                yield direction, "nod"
+                continue
+        if clench is not None and clench.update(s).clench:
+            yield 1, "clench"
 
 
 def selftest() -> int:
-    det = NodDetector()
-    events = [(round(t, 2), d) for t, d in ((t, det.feed(p, t)) for p, t in simulate()) if d]
-    expected = [1, -1, 1, -1, 1, -1]
-    got = [d for _, d in events]
-    ok = got == expected
-    print(f"selftest: {len(events)} gestures {got} — {'ok' if ok else 'FAILED, expected ' + str(expected)}")
+    events = list(gestures(simulate(), NodDetector(), Controller()))
+    nods = [d for d, why in events if why == "nod"]
+    clenches = [d for d, why in events if why == "clench"]
+    ok = nods == [1, -1, 1, -1, 1, -1] and clenches == [1, 1, 1]
+    print(f"selftest: nods {nods}, clenches {clenches} — {'ok' if ok else 'FAILED'}")
     return 0 if ok else 1
 
 
@@ -163,24 +179,29 @@ def main() -> int:
     ap.add_argument("--keys", action="store_true", help="send arrow keys instead of scroll events")
     ap.add_argument("--reverse", action="store_true", help="flip the scroll direction")
     ap.add_argument("--nod", type=float, default=DEFAULT_NOD_DEG, help="degrees of tilt that count as a nod")
+    ap.add_argument("--clench", action="store_true", help="a jaw clench advances the feed too")
+    ap.add_argument("--no-nod", action="store_true", help="ignore head nods (use with --clench)")
+    ap.add_argument("--clench-impulse", type=float, default=0.02,
+                    help="acceleration that counts as a clench (the repo's game default)")
     ap.add_argument("--demo", action="store_true", help="print gestures, send no events")
     ap.add_argument("--simulate", action="store_true", help="use a synthetic head, no AirPods needed")
-    ap.add_argument("--selftest", action="store_true", help="check the detector against synthetic nods")
+    ap.add_argument("--selftest", action="store_true", help="check the detectors against synthetic motion")
     args = ap.parse_args()
 
     if args.selftest:
         return selftest()
 
-    det = NodDetector(nod_deg=args.nod)
-    source = simulate() if args.simulate else read_stream(args.host, args.port)
+    nod = None if args.no_nod else NodDetector(nod_deg=args.nod)
+    clench = Controller(threshold=args.clench_impulse) if args.clench else None
+    if nod is None and clench is None:
+        ap.error("nothing to detect: drop --no-nod or add --clench")
+
+    source = simulate(clench=args.clench) if args.simulate else read_stream(args.host, args.port)
     print("calibrating: hold still" if not args.simulate else "simulating a head", flush=True)
 
-    for pitch, t in source:
-        direction = det.feed(pitch, t)
-        if not direction:
-            continue
-        print("next" if direction > 0 else "back", flush=True)
-        if not args.demo and not args.simulate:
+    for direction, why in gestures(source, nod, clench):
+        print(f"{'next' if direction > 0 else 'back'} ({why})", flush=True)
+        if not (args.demo or args.simulate):
             act(direction, args.keys, args.reverse)
     return 0
 
