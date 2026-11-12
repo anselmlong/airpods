@@ -41,3 +41,30 @@ pip install -r game/requirements.txt
 python game/plot_live.py
 python game/record.py --label clench --output data/clench.csv
 ```
+
+## Hands-free scrolling
+
+`game/scroll.py` turns head gestures into scroll events, so a feed advances without touching
+anything: nod down for the next video, nod up to go back. It reads the same motion stream, so it
+needs `--stream-only` running and nothing else from this app.
+
+```bash
+pip install pyobjc-framework-Quartz          # macOS only
+./airpods.app/Contents/MacOS/airpods --stream-only &
+python game/scroll.py
+```
+
+Hold still for the first 1.5 seconds: that is where "neutral" comes from, so the gesture is relative
+to how you are actually sitting. Then nod. `--nod 10` makes it more sensitive, `--keys` sends arrow
+keys instead of wheel events, `--reverse` flips the scroll direction.
+
+Nothing needs AirPods to try it:
+
+```bash
+python game/scroll.py --selftest    # synthetic nods, asserts the gestures it emits
+python game/scroll.py --simulate    # watch a synthetic head drive it, sends no events
+```
+
+Sending events needs Accessibility permission for the terminal (System Settings -> Privacy &
+Security -> Accessibility). It scrolls whatever window has focus, so it works on the web players
+(TikTok, Reels, Shorts), not in the phone apps.
