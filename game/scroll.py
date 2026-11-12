@@ -28,7 +28,7 @@ import os
 import signal
 import sys
 
-from control import Controller
+from control import JAW_ACCEL_IMPULSE, JAW_GYRO_IMPULSE, JAW_STILL_DEG, JawClench
 from stream import MotionStream, Sample
 
 DEFAULT_NOD_DEG = 10.0
@@ -133,21 +133,37 @@ def read_stream(host: str, port: int):
             yield sample
 
 
-def simulate(step_s: float = 0.02, cycles: int = 3, clench: bool = True):
-    """A head that holds still, nods down, returns, nods up, then clenches."""
+def simulate(step_s: float = 0.02, cycles: int = 3, clench: bool = True, turns: bool = True):
+    """A head that holds still, nods down, returns, nods up, turns side to side, then clenches.
+
+    Moves carry their rotation rate and a small jolt as they start, like the real sensor.
+    """
     t = 0.0
 
-    def ramp(a: float, b: float, dur: float):
+    def move(axis: int, a: float, b: float, dur: float):
+        """Rotate one axis (0 yaw, 1 pitch) from a to b degrees, with its rate and a starting jolt."""
         nonlocal t
         n = max(1, int(dur / step_s))
+        rate = math.radians(b - a) / dur
         for i in range(n):
-            yield Sample(0.0, math.radians(a + (b - a) * (i + 1) / n), 0.0, 0.0, 0.0, 0.0, t)
+            angle = math.radians(a + (b - a) * (i + 1) / n)
+            jolt = 0.05 if i == 0 else 0.0
+            attitude = (angle, 0.0) if axis == 0 else (0.0, angle)
+            accel = (0.0, jolt) if axis == 0 else (jolt, 0.0)
+            gyro = (0.0, rate) if axis == 0 else (rate, 0.0)
+            yield Sample(*attitude, 0.0, *accel, 0.0, t, gyro[0], 0.0, gyro[1])
             t += step_s
+
+    def ramp(a: float, b: float, dur: float):
+        return move(1, a, b, dur)
+
+    def turn(a: float, b: float, dur: float):
+        return move(0, a, b, dur)
 
     def hold(deg: float, dur: float, spike: float = 0.0):
         nonlocal t
         for _ in range(max(1, int(dur / step_s))):
-            yield Sample(0.0, math.radians(deg), 0.0, spike, 0.0, 0.0, t)
+            yield Sample(0.0, math.radians(deg), 0.0, spike, 0.0, 0.0, t, spike, 0.0, 0.0)
             t += step_s
 
     yield from hold(0.0, 2.0)            # calibration window
@@ -158,29 +174,34 @@ def simulate(step_s: float = 0.02, cycles: int = 3, clench: bool = True):
         yield from ramp(0.0, -22.0, 0.6)  # nod up
         yield from ramp(-22.0, 0.0, 0.4)
         yield from hold(0.0, 1.0)
+        if turns:
+            for a, b, dur in ((0.0, 45.0, 0.5), (45.0, 0.0, 0.5), (0.0, -30.0, 1.0), (-30.0, 0.0, 0.3)):
+                yield from turn(a, b, dur)  # fast and slow head turns: must not count as clenches
+                yield from hold(0.0, 0.6)
         if clench:
             yield from hold(0.0, 0.06, spike=0.6)  # jaw clench: acceleration, no head movement
             yield from hold(0.0, 1.0)
 
 
-def gestures(source, nod: "NodDetector | None", clench: "Controller | None"):
+def gestures(source, nod: "NodDetector | None", clench: "JawClench | None"):
     """Yield (direction, reason) for every gesture in a stream of samples.
 
     Detectors keep running while paused so their state stays current; only the events stop.
     """
     for s in source:
         direction, reason = 0, ""
+        clenched = clench is not None and clench.update(s)  # every sample, so its history has no holes
         if nod is not None:
             direction = nod.feed(s.pitch, s.t)
             reason = "nod"
-        if not direction and clench is not None and clench.update(s).clench:
+        if not direction and clenched:
             direction, reason = 1, "clench"
         if direction and not PAUSED:
             yield direction, reason
 
 
 def selftest() -> int:
-    events = list(gestures(simulate(), NodDetector(), Controller()))
+    events = list(gestures(simulate(), NodDetector(), JawClench()))
     nods = [d for d, why in events if why == "nod"]
     clenches = [d for d, why in events if why == "clench"]
     ok = nods == [1, -1, 1, -1, 1, -1] and clenches == [1, 1, 1]
@@ -197,8 +218,14 @@ def main() -> int:
     ap.add_argument("--nod", type=float, default=DEFAULT_NOD_DEG, help="degrees of tilt that count as a nod")
     ap.add_argument("--clench", action="store_true", help="a jaw clench advances the feed too")
     ap.add_argument("--no-nod", action="store_true", help="ignore head nods (use with --clench)")
-    ap.add_argument("--clench-impulse", type=float, default=0.02,
-                    help="acceleration that counts as a clench (the repo's game default)")
+    ap.add_argument("--clench-impulse", type=float, default=JAW_ACCEL_IMPULSE,
+                    help="acceleration spike that counts as a clench (the Swift app's default)")
+    ap.add_argument("--clench-gyro", type=float, default=JAW_GYRO_IMPULSE,
+                    help="rotation-rate spike that counts as a clench (the Swift app's default)")
+    ap.add_argument("--clench-still", type=float, default=JAW_STILL_DEG,
+                    help="degrees the head may move during a clench before it counts as a turn")
+    ap.add_argument("--clench-debug", action="store_true",
+                    help="print every clench candidate and why it was kept or rejected")
     ap.add_argument("--demo", action="store_true", help="print gestures, send no events")
     ap.add_argument("--simulate", action="store_true", help="use a synthetic head, no AirPods needed")
     ap.add_argument("--selftest", action="store_true", help="check the detectors against synthetic motion")
@@ -208,7 +235,16 @@ def main() -> int:
         return selftest()
 
     nod = None if args.no_nod else NodDetector(nod_deg=args.nod)
-    clench = Controller(threshold=args.clench_impulse) if args.clench else None
+    clench = (
+        JawClench(
+            accel_impulse=args.clench_impulse,
+            gyro_impulse=args.clench_gyro,
+            still_deg=args.clench_still,
+            debug=args.clench_debug,
+        )
+        if args.clench
+        else None
+    )
     if nod is None and clench is None:
         ap.error("nothing to detect: drop --no-nod or add --clench")
 

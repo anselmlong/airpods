@@ -56,7 +56,9 @@ Clicks are ignored while tracking is paused, and until calibration finishes.
 
 ## Motion stream
 
-Headphone motion is also sent as UDP text, `yaw,pitch,roll,ax,ay,az`, to `127.0.0.1:9999`.
+Headphone motion is also sent as UDP text, `yaw,pitch,roll,ax,ay,az,rx,ry,rz`, to `127.0.0.1:9999`.
+The last three are rotation rate in rad/s. Builds before this sent only the first six fields, and
+`game/stream.py` reads either.
 
 ```bash
 ./airpods.app/Contents/MacOS/airpods --stream-only
@@ -94,8 +96,12 @@ python game/scroll.py --clench --no-nod    # clench only, no head movement neede
 python game/scroll.py --clench             # nods as before, plus clench to advance
 ```
 
-`--clench-impulse 0.02` is the acceleration that counts as a clench (the game default). A clench is
-an acceleration spike with no change in head attitude, so turning your head does not scroll.
+The scroller uses the app's clench thresholds (`Sources/airpods/jaw.swift`): a spike above the
+median of a 0.12 s window, in acceleration (`--clench-impulse 0.008`) or rotation rate
+(`--clench-gyro 0.45`), with 0.4 s between clenches. Starting or stopping a head turn spikes too,
+so a spike only counts if the head stayed within `--clench-still 2` degrees from 0.3 s before it to
+0.1 s after it. Clenches register about 0.1 s late as a result. `--clench-debug` prints every spike
+and why it was kept or rejected.
 
 Nothing needs AirPods to try it:
 
