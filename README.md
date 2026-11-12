@@ -55,7 +55,7 @@ python game/scroll.py
 ```
 
 Hold still for the first 1.5 seconds: that is where "neutral" comes from, so the gesture is relative
-to how you are actually sitting. Then nod. `--nod 10` makes it more sensitive, `--keys` sends arrow
+to how you are actually sitting. Then nod. `--nod 7` makes it more sensitive, `--keys` sends arrow
 keys instead of wheel events, `--reverse` flips the scroll direction.
 
 Nothing needs AirPods to try it:
