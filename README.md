@@ -6,7 +6,23 @@ AirPods supply the jaw signal through headphone motion. The cursor itself comes 
 
 Requires macOS 14, AirPods that report headphone motion, and a camera.
 
-## Run
+## Install
+
+```bash
+git clone https://github.com/anselmlong/airpods.git
+cd airpods
+./install.sh          # builds the app, installs the Python bits, adds `airpods-scroll`
+airpods-scroll        # starts the motion stream if needed, then scrolls hands-free
+```
+
+`install.sh` needs macOS 14+, Xcode Command Line Tools and Python 3.10+. It keeps everything out of
+the system: a venv under `~/.local/share/airpods-scroll`, one command in `~/.local/bin`. It asks
+macOS for Accessibility, because sending scroll events needs it, and the app asks for Motion &
+Fitness on first launch. `./install.sh --uninstall` removes both.
+
+Options pass through: `airpods-scroll --clench --no-nod`.
+
+## Run from a checkout
 
 ```bash
 ./build.sh
