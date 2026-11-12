@@ -58,6 +58,16 @@ Hold still for the first 1.5 seconds: that is where "neutral" comes from, so the
 to how you are actually sitting. Then nod. `--nod 7` makes it more sensitive, `--keys` sends arrow
 keys instead of wheel events, `--reverse` flips the scroll direction.
 
+A jaw clench can advance the feed too, using the same detector the game tools use for a click:
+
+```bash
+python game/scroll.py --clench --no-nod    # clench only, no head movement needed
+python game/scroll.py --clench             # nods as before, plus clench to advance
+```
+
+`--clench-impulse 0.02` is the acceleration that counts as a clench (the game default). A clench is
+an acceleration spike with no change in head attitude, so turning your head does not scroll.
+
 Nothing needs AirPods to try it:
 
 ```bash
