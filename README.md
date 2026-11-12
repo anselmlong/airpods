@@ -9,6 +9,15 @@ Requires macOS 14, AirPods that report headphone motion, and a camera.
 ## Install
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/anselmlong/airpods/main/get.sh | sh
+```
+
+That clones into `~/.airpods` and runs the installer below; run it again to update. Options pass
+through, so `curl -fsSL ... | sh -s -- --uninstall` removes what it created.
+
+Or from a clone, if you would rather see the scripts first:
+
+```bash
 git clone https://github.com/anselmlong/airpods.git
 cd airpods
 ./install.sh          # builds the app, installs the Python bits, adds `airpods-scroll`
