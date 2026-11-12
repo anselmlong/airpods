@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
+import signal
 import sys
 
 from control import Controller
@@ -34,6 +36,16 @@ DEFAULT_CALIBRATE_S = 1.5
 DEFAULT_REFRACTORY_S = 0.7
 DEFAULT_RETURN_FRACTION = 0.45
 SCROLL_LINES = 12
+
+# Toggled by SIGUSR1 (the launcher's `--toggle`). Gestures are still detected while paused,
+# they just stop producing events, so resuming does not replay whatever happened in between.
+PAUSED = False
+
+
+def _toggle_pause(signum, frame):
+    global PAUSED
+    PAUSED = not PAUSED
+    print("paused" if PAUSED else "resumed", flush=True)
 
 
 class NodDetector:
@@ -152,15 +164,19 @@ def simulate(step_s: float = 0.02, cycles: int = 3, clench: bool = True):
 
 
 def gestures(source, nod: "NodDetector | None", clench: "Controller | None"):
-    """Yield (direction, reason) for every gesture in a stream of samples."""
+    """Yield (direction, reason) for every gesture in a stream of samples.
+
+    Detectors keep running while paused so their state stays current; only the events stop.
+    """
     for s in source:
+        direction, reason = 0, ""
         if nod is not None:
             direction = nod.feed(s.pitch, s.t)
-            if direction:
-                yield direction, "nod"
-                continue
-        if clench is not None and clench.update(s).clench:
-            yield 1, "clench"
+            reason = "nod"
+        if not direction and clench is not None and clench.update(s).clench:
+            direction, reason = 1, "clench"
+        if direction and not PAUSED:
+            yield direction, reason
 
 
 def selftest() -> int:
@@ -196,6 +212,7 @@ def main() -> int:
     if nod is None and clench is None:
         ap.error("nothing to detect: drop --no-nod or add --clench")
 
+    signal.signal(signal.SIGUSR1, _toggle_pause)
     source = simulate(clench=args.clench) if args.simulate else read_stream(args.host, args.port)
     print("calibrating: hold still" if not args.simulate else "simulating a head", flush=True)
 

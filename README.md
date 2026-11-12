@@ -31,6 +31,10 @@ Fitness on first launch. `./install.sh --uninstall` removes both.
 
 Options pass through: `airpods-scroll --clench --no-nod`.
 
+While it runs, `airpods-scroll --toggle` pauses and resumes gestures without stopping the stream,
+`airpods-scroll --stop` ends it, and Control-C does the same. The stream the launcher started is
+stopped with it, and a pause never replays gestures that happened while you were paused.
+
 ## Run from a checkout
 
 ```bash

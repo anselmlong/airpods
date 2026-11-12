@@ -50,11 +50,39 @@ mkdir -p "$DATA" "$BIN_DIR"
 cat > "$LAUNCHER" <<EOF
 #!/bin/sh
 # Start the motion stream if it is not already running, then scroll hands-free.
-# Stop with Control-C; the stream this script started is stopped with it.
+#
+#   airpods-scroll            start
+#   airpods-scroll --toggle   pause or resume gestures, without stopping the stream
+#   airpods-scroll --stop     stop it
+#   airpods-scroll --demo     pass anything else through to scroll.py
+#
+# Control-C also stops it, and the stream this script started is stopped with it.
 set -eu
 APP="$REPO/airpods.app/Contents/MacOS/airpods"
+PYTHON="$DATA/venv/bin/python"
 PORT=\${AIRPODS_PORT:-9999}
+PIDFILE="$DATA/scroll.pid"
+
+case "\${1:-}" in
+  --toggle)
+    [ -f "\$PIDFILE" ] || { echo "airpods-scroll is not running" >&2; exit 1; }
+    kill -USR1 "\$(cat "\$PIDFILE")"
+    exit 0 ;;
+  --stop)
+    [ -f "\$PIDFILE" ] || { echo "airpods-scroll is not running" >&2; exit 1; }
+    kill "\$(cat "\$PIDFILE")"
+    exit 0 ;;
+esac
+
 started=""
+child=""
+cleanup() {
+  rm -f "\$PIDFILE"
+  [ -n "\$child" ] && kill "\$child" 2>/dev/null || true
+  [ -n "\$started" ] && kill "\$started" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
 if ! "$DATA/venv/bin/python" - "\$PORT" <<'PY'
 import socket, sys
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -66,10 +94,15 @@ PY
 then :; else
   "\$APP" --stream-only 127.0.0.1 "\$PORT" >/dev/null 2>&1 &
   started=\$!
-  trap '[ -n "\$started" ] && kill "\$started" 2>/dev/null || true' EXIT INT TERM
   sleep 1
 fi
-exec "$DATA/venv/bin/python" "$REPO/game/scroll.py" --port "\$PORT" "\$@"
+
+"\$PYTHON" "$REPO/game/scroll.py" --port "\$PORT" "\$@" &
+child=\$!
+echo \$child > "\$PIDFILE"
+status=0
+wait "\$child" || status=\$?
+exit "\$status"
 EOF
 chmod +x "$LAUNCHER"
 
